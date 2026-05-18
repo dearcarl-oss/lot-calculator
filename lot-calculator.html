@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#0a0a0f" />
+  <title>XAU/USD Lot Calculator</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0a0a0f; font-family: 'Courier New', monospace; }
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: #0a0a0f; }
+    ::-webkit-scrollbar-thumb { background: #a8882e; border-radius: 2px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState } = React;
+
+    const C = {
+      bg: "#0a0a0f", surface: "#12121a", card: "#1a1a26",
+      gold: "#f5c842", goldDim: "#a8882e", goldGlow: "rgba(245,200,66,0.15)",
+      red: "#ff4d4d", green: "#3ddc84", text: "#e8e8f0",
+      muted: "#6b6b8a", border: "rgba(245,200,66,0.12)",
+    };
+
+    const RISK_PRESETS = [50, 100, 150, 200, 250];
+    const CAPITAL_PRESETS = [10000, 25000, 50000, 100000];
+    const SL_PRESETS = [30, 50, 80, 100, 150, 200];
+
+    function App() {
+      const [risk, setRisk] = useState(50);
+      const [slPips, setSlPips] = useState(80);
+      const [capital, setCapital] = useState(10000);
+      const [riskMode, setRiskMode] = useState("fixed");
+      const [riskPercent, setRiskPercent] = useState(1);
+      const [inputMode, setInputMode] = useState("pips");
+      const [focused, setFocused] = useState(null);
+      const [direction, setDirection] = useState("SELL");
+      const [entryPrice, setEntryPrice] = useState("");
+      const [slPrice, setSlPrice] = useState("");
+      const [tpPrice, setTpPrice] = useState("");
+
+      const pip = 10;
+
+      const calcPips = (a, b) => {
+        if (!a || !b || isNaN(a) || isNaN(b)) return 0;
+        return Math.round(Math.abs(parseFloat(a) - parseFloat(b)) * 10);
+      };
+
+      const slPipsFromPrice = calcPips(entryPrice, slPrice);
+      const tpPipsFromPrice = calcPips(entryPrice, tpPrice);
+      const activeSL = inputMode === "price" ? slPipsFromPrice : slPips;
+      const effectiveRisk = riskMode === "percent" ? (capital * riskPercent) / 100 : risk;
+      const lotSize = activeSL > 0 ? effectiveRisk / (activeSL * pip) : 0;
+      const lot = Math.floor(lotSize * 100) / 100;
+      const maxLoss = lot * activeSL * pip;
+      const potentialProfit = tpPipsFromPrice > 0 ? lot * tpPipsFromPrice * pip : null;
+      const rr = potentialProfit ? (potentialProfit / effectiveRisk).toFixed(2) : null;
+      const riskPct = ((effectiveRisk / capital) * 100).toFixed(2);
+      const overRisk = parseFloat(riskPct) > 2;
+
+      const directionValid = () => {
+        if (!entryPrice || !slPrice || !tpPrice) return true;
+        const e = parseFloat(entryPrice), s = parseFloat(slPrice), t = parseFloat(tpPrice);
+        return direction === "BUY" ? (s < e && t > e) : (s > e && t < e);
+      };
+      const priceError = inputMode === "price" && entryPrice && slPrice && tpPrice && !directionValid()
+        ? `En ${direction}, SL doit être ${direction === "BUY" ? "en dessous" : "au dessus"} de l'entrée et TP ${direction === "BUY" ? "au dessus" : "en dessous"}.`
+        : null;
+
+      const fmtLot = l => l === 0 ? "0.00" : l < 0.01 ? l.toFixed(4) : l.toFixed(2);
+      const lotCat = l => l >= 1 ? { label: "STANDARD", color: C.gold } : l >= 0.1 ? { label: "MINI", color: "#60a0ff" } : { label: "MICRO", color: C.green };
+      const cat = lotCat(lot);
+
+      const inp = (key, extra = {}) => ({
+        style: {
+          flex: 1, background: C.surface, border: `1px solid ${focused === key ? C.gold : C.border}`,
+          borderRadius: 2, color: C.gold, fontSize: 20, fontFamily: "'Courier New', monospace",
+          fontWeight: "bold", padding: "12px 16px", outline: "none", width: "100%", transition: "border-color 0.2s",
+          ...extra
+        },
+        onFocus: () => setFocused(key),
+        onBlur: () => setFocused(null),
+      });
+
+      const card = { background: C.card, border: `1px solid ${C.border}`, borderRadius: 2, padding: 24, marginBottom: 12, position: "relative" };
+      const lbl = { fontSize: 10, letterSpacing: 2, color: C.muted, textTransform: "uppercase", marginBottom: 8, display: "block" };
+      const row = { display: "flex", gap: 8, alignItems: "center" };
+      const unit = (col) => ({ fontSize: 11, color: col || C.muted, letterSpacing: 1, whiteSpace: "nowrap" });
+      const presets = { display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" };
+      const btn = (active, col) => ({
+        background: active ? (col ? `${col}22` : C.goldGlow) : "transparent",
+        border: `1px solid ${active ? (col || C.gold) : C.border}`,
+        color: active ? (col || C.gold) : C.muted,
+        fontSize: 11, padding: "4px 10px", cursor: "pointer",
+        fontFamily: "'Courier New', monospace", letterSpacing: 1, borderRadius: 2, transition: "all 0.15s",
+      });
+
+      return (
+        <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "'Courier New', monospace", display: "flex", flexDirection: "column", alignItems: "center", padding: "24px 16px", position: "relative", overflow: "hidden" }}>
+          {/* Grid bg */}
+          <div style={{ position: "fixed", inset: 0, backgroundImage: "linear-gradient(rgba(245,200,66,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(245,200,66,0.03) 1px,transparent 1px)", backgroundSize: "40px 40px", pointerEvents: "none" }} />
+          <div style={{ position: "fixed", top: "20%", left: "50%", transform: "translateX(-50%)", width: 400, height: 400, background: "radial-gradient(circle,rgba(245,200,66,0.06) 0%,transparent 70%)", pointerEvents: "none" }} />
+
+          <div style={{ width: "100%", maxWidth: 420, position: "relative", zIndex: 1 }}>
+
+            {/* Header */}
+            <div style={{ textAlign: "center", marginBottom: 32 }}>
+              <div style={{ display: "inline-block", background: C.goldGlow, border: `1px solid ${C.goldDim}`, color: C.goldDim, fontSize: 10, letterSpacing: 3, padding: "4px 12px", marginBottom: 12, textTransform: "uppercase" }}>XAU/USD · GOLD</div>
+              <h1 style={{ fontSize: 28, fontWeight: "bold", color: C.gold, letterSpacing: 2, margin: "0 0 4px", textShadow: "0 0 30px rgba(245,200,66,0.4)" }}>LOT CALCULATOR</h1>
+              <p style={{ fontSize: 11, color: C.muted, letterSpacing: 2, textTransform: "uppercase" }}>Position Sizing · Risk Management</p>
+            </div>
+
+            {/* Capital */}
+            <div style={card}>
+              <div style={{ position: "absolute", top: 0, left: 0, width: 3, height: "100%", background: `linear-gradient(to bottom,${C.gold},${C.goldDim})`, borderRadius: "2px 0 0 2px" }} />
+              <label style={lbl}>Capital du compte ($)</label>
+              <div style={row}>
+                <input {...inp("capital")} type="number" value={capital} onChange={e => setCapital(Number(e.target.value))} />
+                <span style={unit()}>USD</span>
+              </div>
+              <div style={presets}>
+                {CAPITAL_PRESETS.map(v => <button key={v} style={btn(capital === v)} onClick={() => setCapital(v)}>{v >= 1000 ? `${v/1000}K` : v}</button>)}
+              </div>
+            </div>
+
+            {/* Risk */}
+            <div style={card}>
+              <div style={{ position: "absolute", top: 0, left: 0, width: 3, height: "100%", background: `linear-gradient(to bottom,${C.gold},${C.goldDim})`, borderRadius: "2px 0 0 2px" }} />
+              <label style={lbl}>Mode de risque</label>
+              <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+                {["fixed","percent"].map(m => <button key={m} style={{ ...btn(riskMode === m), flex: 1, padding: 8, textAlign: "center" }} onClick={() => setRiskMode(m)}>{m === "fixed" ? "$ FIXE" : "% CAPITAL"}</button>)}
+              </div>
+              {riskMode === "fixed" ? (
+                <>
+                  <label style={lbl}>Risque par trade ($)</label>
+                  <div style={row}>
+                    <input {...inp("risk")} type="number" value={risk} onChange={e => setRisk(Number(e.target.value))} />
+                    <span style={unit()}>USD</span>
+                  </div>
+                  <div style={presets}>
+                    {RISK_PRESETS.map(v => <button key={v} style={btn(risk === v)} onClick={() => setRisk(v)}>${v}</button>)}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <label style={lbl}>% du capital à risquer</label>
+                  <div style={row}>
+                    <input {...inp("pct")} type="number" step="0.1" min="0.1" max="10" value={riskPercent} onChange={e => setRiskPercent(Number(e.target.value))} />
+                    <span style={unit()}>%</span>
+                  </div>
+                  <div style={presets}>
+                    {[0.5,1,1.5,2].map(v => <button key={v} style={btn(riskPercent === v)} onClick={() => setRiskPercent(v)}>{v}%</button>)}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* SL/TP Mode */}
+            <div style={card}>
+              <div style={{ position: "absolute", top: 0, left: 0, width: 3, height: "100%", background: `linear-gradient(to bottom,${C.gold},${C.goldDim})`, borderRadius: "2px 0 0 2px" }} />
+              <label style={lbl}>Mode de saisie SL/TP</label>
+              <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                {["pips","price"].map(m => <button key={m} style={{ ...btn(inputMode === m), flex: 1, padding: 8, textAlign: "center" }} onClick={() => setInputMode(m)}>{m === "pips" ? "EN PIPS" : "PAR PRIX"}</button>)}
+              </div>
+
+              {inputMode === "pips" ? (
+                <>
+                  <label style={lbl}>Stop Loss (pips)</label>
+                  <div style={row}>
+                    <input {...inp("sl")} type="number" value={slPips} onChange={e => setSlPips(Number(e.target.value))} />
+                    <span style={unit()}>PIPS</span>
+                  </div>
+                  <div style={presets}>
+                    {SL_PRESETS.map(v => <button key={v} style={btn(slPips === v)} onClick={() => setSlPips(v)}>{v}</button>)}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <label style={lbl}>Direction</label>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+                    {["BUY","SELL"].map(d => (
+                      <button key={d} style={{ ...btn(direction === d, d === "BUY" ? C.green : C.red), flex: 1, padding: 10, textAlign: "center", fontSize: 13, fontWeight: "bold" }} onClick={() => setDirection(d)}>
+                        {d === "BUY" ? "▲ BUY" : "▼ SELL"}
+                      </button>
+                    ))}
+                  </div>
+
+                  <label style={lbl}>Prix d'entrée</label>
+                  <div style={{ ...row, marginBottom: 10 }}>
+                    <input {...inp("entry")} type="number" step="0.01" placeholder="ex: 3245.50" value={entryPrice} onChange={e => setEntryPrice(e.target.value)} />
+                    <span style={unit()}>USD</span>
+                  </div>
+
+                  <label style={lbl}>Prix Stop Loss</label>
+                  <div style={{ ...row, marginBottom: 10 }}>
+                    <input {...inp("slp", { borderColor: focused === "slp" ? C.red : slPrice ? "rgba(255,77,77,0.3)" : C.border })} type="number" step="0.01" placeholder="ex: 3230.00" value={slPrice} onChange={e => setSlPrice(e.target.value)} />
+                    <span style={unit(C.red)}>SL</span>
+                  </div>
+
+                  <label style={lbl}>Prix Take Profit</label>
+                  <div style={row}>
+                    <input {...inp("tpp", { borderColor: focused === "tpp" ? C.green : tpPrice ? "rgba(61,220,132,0.3)" : C.border })} type="number" step="0.01" placeholder="ex: 3280.00" value={tpPrice} onChange={e => setTpPrice(e.target.value)} />
+                    <span style={unit(C.green)}>TP</span>
+                  </div>
+
+                  {slPipsFromPrice > 0 && (
+                    <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <div style={{ ...btn(true, C.red), cursor: "default", background: "rgba(255,77,77,0.05)" }}>SL = {slPipsFromPrice} pips</div>
+                      {tpPipsFromPrice > 0 && <div style={{ ...btn(true, C.green), cursor: "default", background: "rgba(61,220,132,0.05)" }}>TP = {tpPipsFromPrice} pips</div>}
+                      {rr && <div style={{ ...btn(true, "#60a0ff"), cursor: "default", background: "rgba(96,160,255,0.05)" }}>R:R = 1:{rr}</div>}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Errors */}
+            {priceError && (
+              <div style={{ background: "rgba(255,77,77,0.05)", border: "1px solid rgba(255,77,77,0.2)", borderRadius: 2, padding: "12px 16px", marginBottom: 12, fontSize: 11, color: "#ff8080", display: "flex", gap: 8, lineHeight: 1.5 }}>
+                <span>⚠</span><span>{priceError}</span>
+              </div>
+            )}
+            {overRisk && (
+              <div style={{ background: "rgba(255,77,77,0.05)", border: "1px solid rgba(255,77,77,0.2)", borderRadius: 2, padding: "12px 16px", marginBottom: 12, fontSize: 11, color: "#ff8080", display: "flex", gap: 8, lineHeight: 1.5 }}>
+                <span>⚠</span><span>Risque de <strong>{riskPct}%</strong> — dépasse les 2% recommandés pour les prop firms.</span>
+              </div>
+            )}
+
+            {/* Result */}
+            <div style={{ background: "linear-gradient(135deg,#1a1a26 0%,#12121f 100%)", border: "1px solid rgba(245,200,66,0.25)", borderRadius: 2, padding: "28px 24px", marginBottom: 12, textAlign: "center", position: "relative", overflow: "hidden" }}>
+              <div style={{ position: "absolute", inset: 0, background: "radial-gradient(ellipse at center top,rgba(245,200,66,0.07) 0%,transparent 70%)", pointerEvents: "none" }} />
+              <div style={{ fontSize: 10, letterSpacing: 3, color: C.muted, textTransform: "uppercase", marginBottom: 8 }}>Taille de position</div>
+              <div style={{ fontSize: 52, fontWeight: "bold", color: C.gold, lineHeight: 1, textShadow: "0 0 40px rgba(245,200,66,0.5)", letterSpacing: -1 }}>{fmtLot(lot)}</div>
+              <div style={{ fontSize: 14, color: C.goldDim, letterSpacing: 2, marginTop: 4 }}>LOT · <span style={{ color: cat.color, fontSize: 12 }}>{cat.label}</span></div>
+
+              <div style={{ width: 40, height: 1, background: `linear-gradient(to right,transparent,${C.goldDim},transparent)`, margin: "16px auto" }} />
+
+              <div style={{ display: "flex", justifyContent: "space-around", gap: 16 }}>
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: 16, fontWeight: "bold", color: C.red }}>-${maxLoss.toFixed(0)}</div>
+                  <div style={{ fontSize: 9, color: C.muted, letterSpacing: 2, textTransform: "uppercase", marginTop: 2 }}>Perte max</div>
+                </div>
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: 16, fontWeight: "bold", color: C.gold }}>${effectiveRisk.toFixed(0)}</div>
+                  <div style={{ fontSize: 9, color: C.muted, letterSpacing: 2, textTransform: "uppercase", marginTop: 2 }}>Risque</div>
+                </div>
+                {potentialProfit ? (
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: 16, fontWeight: "bold", color: C.green }}>+${potentialProfit.toFixed(0)}</div>
+                    <div style={{ fontSize: 9, color: C.muted, letterSpacing: 2, textTransform: "uppercase", marginTop: 2 }}>Gain potentiel</div>
+                  </div>
+                ) : (
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: 16, fontWeight: "bold", color: overRisk ? C.red : C.green }}>{riskPct}%</div>
+                    <div style={{ fontSize: 9, color: C.muted, letterSpacing: 2, textTransform: "uppercase", marginTop: 2 }}>% Compte</div>
+                  </div>
+                )}
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: 16, fontWeight: "bold", color: "#60a0ff" }}>${(lot * pip).toFixed(2)}</div>
+                  <div style={{ fontSize: 9, color: C.muted, letterSpacing: 2, textTransform: "uppercase", marginTop: 2 }}>$/pip</div>
+                </div>
+              </div>
+
+              {rr && (
+                <>
+                  <div style={{ width: 40, height: 1, background: `linear-gradient(to right,transparent,${C.goldDim},transparent)`, margin: "16px auto" }} />
+                  <div style={{ display: "flex", justifyContent: "center", gap: 24 }}>
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: 20, fontWeight: "bold", color: "#60a0ff" }}>1 : {rr}</div>
+                      <div style={{ fontSize: 9, color: C.muted, letterSpacing: 2, textTransform: "uppercase", marginTop: 2 }}>Risk / Reward</div>
+                    </div>
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: 20, fontWeight: "bold", color: overRisk ? C.red : C.green }}>{riskPct}%</div>
+                      <div style={{ fontSize: 9, color: C.muted, letterSpacing: 2, textTransform: "uppercase", marginTop: 2 }}>% Compte</div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div style={{ textAlign: "center", fontSize: 9, color: C.muted, letterSpacing: 1, marginTop: 8, opacity: 0.5 }}>
+              XAU/USD · 1 pip = $0.10 · 1 standard lot = $10/pip
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
